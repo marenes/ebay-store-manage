@@ -6,7 +6,11 @@ export const EBAY_SCOPES = [
   "https://api.ebay.com/oauth/api_scope/sell.inventory",
   "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
   "https://api.ebay.com/oauth/api_scope/sell.account",
+  "https://api.ebay.com/oauth/api_scope/commerce.message",
 ];
+
+/** Scopes granted before messages were added; accounts connected back then keep refreshing with these. */
+const LEGACY_SCOPES = EBAY_SCOPES.filter((s) => !s.endsWith("/commerce.message"));
 
 export interface EbayCredentials {
   env: EbayEnv;
@@ -56,6 +60,7 @@ export async function exchangeCode(db: Db, creds: EbayCredentials, code: string,
   );
   if (!token.refresh_token) throw new Error("eBay did not return a refresh token");
   setSetting(db, "ebay.refresh_token", token.refresh_token);
+  setSetting(db, "ebay.scopes", EBAY_SCOPES.join(" "));
   storeAccessToken(db, token);
 }
 
@@ -68,6 +73,16 @@ export function isConnected(db: Db): boolean {
   return getSetting(db, "ebay.refresh_token") !== undefined;
 }
 
+/** Scopes the stored refresh token was granted; eBay rejects a refresh that asks for more. */
+export function grantedScopes(db: Db): string[] {
+  return getSetting(db, "ebay.scopes")?.split(" ") ?? LEGACY_SCOPES;
+}
+
+/** True when the account must be reconnected before the Message API can be used. */
+export function needsMessageReconnect(db: Db): boolean {
+  return isConnected(db) && !grantedScopes(db).some((s) => s.endsWith("/commerce.message"));
+}
+
 /** Returns a valid user access token, refreshing it when it is about to expire. */
 export async function getAccessToken(db: Db, creds: EbayCredentials, fetchImpl: typeof fetch = fetch): Promise<string> {
   const current = getSetting(db, "ebay.access_token");
@@ -78,7 +93,7 @@ export async function getAccessToken(db: Db, creds: EbayCredentials, fetchImpl: 
   if (!refreshToken) throw new Error("eBay account is not connected. Open /auth/ebay in the panel first.");
   const token = await requestToken(
     creds,
-    new URLSearchParams({ grant_type: "refresh_token", refresh_token: refreshToken, scope: EBAY_SCOPES.join(" ") }),
+    new URLSearchParams({ grant_type: "refresh_token", refresh_token: refreshToken, scope: grantedScopes(db).join(" ") }),
     fetchImpl,
   );
   storeAccessToken(db, token);

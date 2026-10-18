@@ -14,6 +14,7 @@ export type EbayEnv = "sandbox" | "production";
 export const config = {
   port: Number(process.env.PORT ?? 3000),
   databasePath: process.env.DATABASE_PATH ?? "data/app.db",
+  messageHistoryDays: Number(process.env.MESSAGE_HISTORY_DAYS ?? 90),
   ebay: {
     get env(): EbayEnv {
       return env("EBAY_ENV", "sandbox") === "production" ? "production" : "sandbox";
@@ -23,6 +24,7 @@ export const config = {
     get ruName() { return env("EBAY_RU_NAME"); },
     get marketplaceId() { return env("EBAY_MARKETPLACE_ID", "EBAY_US"); },
     get currency() { return env("EBAY_CURRENCY", "USD"); },
+    get sellerUsername() { return process.env.EBAY_SELLER_USERNAME || undefined; },
   },
   keepa: {
     get apiKey() { return env("KEEPA_API_KEY"); },

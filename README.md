@@ -4,10 +4,11 @@ Kendi sunucunda çalışan, AutoDS benzeri bir eBay mağaza otomasyonu:
 
 - **Fiyat ve stok takibi:** tedarikçi fiyatını periyodik olarak kontrol eder, senin kurallarına göre eBay fiyatını hesaplar, stok bitince ilanın adedini 0 yapar.
 - **Sipariş yönetimi:** açık eBay siparişlerini çeker. Tedarikçi sipariş numarasını ve kargo takip numarasını panelden girersin, takip numarası eBay'e otomatik gönderilir.
+- **Müşteri mesajları (sadece okuma):** alıcı mesajlarını eBay Message API'den çeker, **Mesajlar** sayfasında konuşma konuşma gösterir ve her konuşmanın yanında alıcının son siparişini ve kargo durumunu gösterir. Şimdilik eBay'e hiçbir mesaj göndermez.
 - **Kendi kuralların:** birden fazla fiyat kural seti (kâr oranı, en az kâr, komisyon, gösterilecek adet, maliyet sınırı, fiyat sonu .99).
 - **Tedarikçiler:** Amazon (Keepa API üzerinden, scraping yok) ve manuel/toptancı (fiyat ve stoğu sen girersin ya da script ile güncellersin). Yeni tedarikçi eklemek için `src/suppliers/types.ts` içindeki `Supplier` arayüzünü uygulaman yeterli.
 
-Sadece eBay'in resmi API'lerini (Sell Inventory ve Fulfillment) kullanır.
+Sadece eBay'in resmi API'lerini (Sell Inventory, Fulfillment ve Commerce Message) kullanır.
 
 ## Önemli: kurallar
 
@@ -46,6 +47,12 @@ https://keepa.com/#!api adresinden API anahtarı al ve `KEEPA_API_KEY` olarak ya
 
 Not: eBay Inventory API sadece Inventory API ile oluşturulmuş ilanlarda çalışır. Seller Hub'dan açtığın eski ilanları önce eBay'in `bulk_migrate_listing` çağrısıyla taşıman gerekir. Bu adım bir sonraki sürümde panele eklenebilir.
 
+### Mesajlar
+
+Mesaj özelliği eklenmeden önce eBay hesabını bağladıysan, panel **Mesajlar** sayfasında "eBay hesabını yeniden bağla" der. Bir kez tıklayıp izin vermen yeterli. Fiyat ve sipariş senkronu bu sırada çalışmaya devam eder.
+
+İlk çekme son `MESSAGE_HISTORY_DAYS` günün (varsayılan 90) konuşmalarını getirir, sonra her `MESSAGE_SYNC_MINUTES` dakikada (varsayılan 5) sadece yenileri çekilir. `EBAY_SELLER_USERNAME` doluysa panel senin mesajlarını alıcınınkinden kesin olarak ayırır; boşsa alıcıyı sipariş listesinden tahmin eder.
+
 ## Ayarlar (.env)
 
 | Değişken | Açıklama |
@@ -56,7 +63,9 @@ Not: eBay Inventory API sadece Inventory API ile oluşturulmuş ilanlarda çalı
 | `KEEPA_API_KEY`, `KEEPA_DOMAIN` | Amazon verisi için (1 = amazon.com) |
 | `PORT`, `HOST` | Panel adresi (varsayılan `127.0.0.1:3000`) |
 | `PANEL_PASSWORD` | Paneli sunucuya açarsan mutlaka belirle (tarayıcı şifre sorar) |
-| `PRICE_SYNC_MINUTES`, `ORDER_SYNC_MINUTES` | Otomatik çalışma sıklığı, 0 kapatır |
+| `PRICE_SYNC_MINUTES`, `ORDER_SYNC_MINUTES`, `MESSAGE_SYNC_MINUTES` | Otomatik çalışma sıklığı, 0 kapatır |
+| `EBAY_SELLER_USERNAME` | eBay kullanıcı adın (mesajlarda kimin yazdığını ayırmak için) |
+| `MESSAGE_HISTORY_DAYS` | İlk mesaj çekmede kaç gün geriye gidilsin (varsayılan 90) |
 | `DATABASE_PATH` | SQLite dosyası (varsayılan `data/app.db`) |
 
 ## Geliştirme

@@ -42,6 +42,34 @@ CREATE TABLE IF NOT EXISTS orders (
   updated_at TEXT NOT NULL
 );
 
+-- Buyer conversations from the eBay Message API (read-only for now).
+CREATE TABLE IF NOT EXISTS conversations (
+  conversation_id TEXT PRIMARY KEY,
+  buyer TEXT,
+  title TEXT,
+  status TEXT,
+  reference_type TEXT,
+  reference_id TEXT,
+  unread_count INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  last_message_at TEXT,
+  last_message_id TEXT,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+  message_id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  sender TEXT,
+  recipient TEXT,
+  subject TEXT,
+  body TEXT NOT NULL,
+  is_read INTEGER NOT NULL,
+  media TEXT
+);
+CREATE INDEX IF NOT EXISTS messages_by_conversation ON messages (conversation_id, created_at);
+
 CREATE TABLE IF NOT EXISTS events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   at TEXT NOT NULL,

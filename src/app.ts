@@ -2,7 +2,9 @@ import { config } from "./config.js";
 import { type Db, logEvent, openDb } from "./db.js";
 import { EbayClient } from "./ebay/client.js";
 import { updatePriceQuantity } from "./ebay/inventory.js";
+import { fetchConversations, fetchMessages } from "./ebay/messages.js";
 import { fetchOpenOrders, uploadTracking } from "./ebay/orders.js";
+import { syncMessages } from "./jobs/sync-messages.js";
 import { syncPrices } from "./jobs/sync-prices.js";
 import { markTrackingUploaded, ordersAwaitingTrackingUpload, saveOrders } from "./jobs/sync-orders.js";
 import { KeepaSupplier } from "./suppliers/keepa.js";
@@ -14,6 +16,7 @@ export interface App {
   ebay: () => EbayClient;
   runPriceSync: () => ReturnType<typeof syncPrices>;
   runOrderSync: () => Promise<{ fetched: number; trackingUploaded: number }>;
+  runMessageSync: () => ReturnType<typeof syncMessages>;
 }
 
 export function createApp(db: Db = openDb(config.databasePath)): App {
@@ -50,6 +53,16 @@ export function createApp(db: Db = openDb(config.databasePath)): App {
         }
       }
       return { fetched, trackingUploaded };
+    },
+    runMessageSync() {
+      const client = ebay();
+      return syncMessages({
+        db,
+        fetchConversations: (since) => fetchConversations(client, since),
+        fetchMessages: (id) => fetchMessages(client, id),
+        sellerUsername: config.ebay.sellerUsername,
+        historyDays: config.messageHistoryDays,
+      });
     },
   };
 }
