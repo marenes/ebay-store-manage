@@ -1,0 +1,24 @@
+{
+  "name": "ebay-store-manage",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Self-hosted eBay store automation: supplier price/stock monitoring, repricing and order management.",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "sync:prices": "tsx src/jobs/cli.ts prices",
+    "sync:orders": "tsx src/jobs/cli.ts orders",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
