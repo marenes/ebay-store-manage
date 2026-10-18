@@ -12,6 +12,7 @@
     "start": "tsx src/server.ts",
     "sync:prices": "tsx src/jobs/cli.ts prices",
     "sync:orders": "tsx src/jobs/cli.ts orders",
+    "sync:messages": "tsx src/jobs/cli.ts messages",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

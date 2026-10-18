@@ -3,7 +3,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createApp } from "./app.js";
 import { config } from "./config.js";
 import { getSetting, logEvent, setSetting } from "./db.js";
-import { authorizationUrl, exchangeCode, isConnected } from "./ebay/auth.js";
+import { authorizationUrl, exchangeCode, isConnected, needsMessageReconnect } from "./ebay/auth.js";
 import { defaultRules } from "./pricing/rules.js";
 import { rulesFor } from "./jobs/sync-prices.js";
 
@@ -22,8 +22,10 @@ main{max-width:1100px;margin:0 auto;padding:16px}table{width:100%;border-collaps
 th,td{padding:8px;border-bottom:1px solid #e3e6eb;text-align:left;vertical-align:top}
 form.inline{display:inline}input,select,textarea{font:inherit;padding:4px}button{font:inherit;padding:4px 10px;cursor:pointer}
 .card{background:#fff;padding:16px;margin-bottom:16px;border-radius:6px}.err{color:#b42318}.ok{color:#067647}
-.wrap{overflow-x:auto}</style></head><body>
-<nav><a href="/">Özet</a><a href="/products">Ürünler</a><a href="/orders">Siparişler</a><a href="/rules">Kurallar</a></nav>
+.wrap{overflow-x:auto}.muted{color:#667085}
+.msg{background:#fff;padding:10px 14px;margin:8px 0;border-radius:6px;max-width:75%;white-space:pre-wrap}
+.msg.buyer{border-left:4px solid #2e90fa}.msg.me{margin-left:auto;background:#ecfdf3;border-right:4px solid #12b76a}</style></head><body>
+<nav><a href="/">Özet</a><a href="/products">Ürünler</a><a href="/orders">Siparişler</a><a href="/messages">Mesajlar</a><a href="/rules">Kurallar</a></nav>
 <main><h1>${esc(title)}</h1>${body}</main></body></html>`;
 }
 
@@ -55,9 +57,11 @@ function dashboard(): string {
 <div class="card">eBay: ${connected ? `<span class="ok">bağlı</span>` : `<span class="err">bağlı değil</span> · <a href="/auth/ebay">eBay hesabını bağla</a>`}
  (${esc(process.env.EBAY_ENV ?? "sandbox")})</div>
 <div class="card">Ürün: <b>${count("SELECT COUNT(*) n FROM products")}</b> · Stokta olmayan: <b>${count("SELECT COUNT(*) n FROM products WHERE supplier_in_stock = 0")}</b>
- · Bekleyen sipariş: <b>${count("SELECT COUNT(*) n FROM orders WHERE fulfillment_status != 'FULFILLED'")}</b></div>
+ · Bekleyen sipariş: <b>${count("SELECT COUNT(*) n FROM orders WHERE fulfillment_status != 'FULFILLED'")}</b>
+ · Okunmamış mesajlı konuşma: <b>${count("SELECT COUNT(*) n FROM conversations WHERE unread_count > 0")}</b></div>
 <div class="card"><form class="inline" method="post" action="/sync/prices"><button>Fiyat/stok kontrolü çalıştır</button></form>
- <form class="inline" method="post" action="/sync/orders"><button>Siparişleri çek</button></form></div>
+ <form class="inline" method="post" action="/sync/orders"><button>Siparişleri çek</button></form>
+ <form class="inline" method="post" action="/sync/messages"><button>Mesajları çek</button></form></div>
 <div class="card"><h2>Son olaylar</h2><table>${events.map((e) => `<tr><td>${esc(e.at)}</td><td class="${e.kind === "error" ? "err" : ""}">${esc(e.kind)}</td><td>${esc(e.message)}</td></tr>`).join("")}</table></div>`);
 }
 
@@ -97,6 +101,58 @@ ${r.tracking_uploaded_at ? `<small class="ok">eBay'e gönderildi</small>` : `<bu
   }).join("")}</table></div>`);
 }
 
+const reconnectNote = () =>
+  needsMessageReconnect(db)
+    ? `<div class="card err">Mesajları okumak için eBay'e yeni bir izin gerekiyor. <a href="/auth/ebay">eBay hesabını yeniden bağla</a>, sonra "Mesajları çek" de.</div>`
+    : "";
+
+/** Most recent order of this buyer, so a message can be read next to its order. */
+const latestOrderOf = (buyer: unknown) =>
+  buyer ? (db.prepare("SELECT * FROM orders WHERE buyer = ? ORDER BY created_at DESC LIMIT 1").get(String(buyer)) as Record<string, unknown> | undefined) : undefined;
+
+function messages(): string {
+  const rows = db.prepare(`
+    SELECT c.*, (SELECT body FROM messages m WHERE m.message_id = c.last_message_id) AS last_body,
+      (SELECT sender FROM messages m WHERE m.message_id = c.last_message_id) AS last_sender
+    FROM conversations c ORDER BY c.last_message_at DESC LIMIT 200`).all() as Array<Record<string, unknown>>;
+  const syncedAt = getSetting(db, "messages.synced_at");
+  return page("Mesajlar", `${reconnectNote()}
+<div class="card"><form class="inline" method="post" action="/sync/messages"><button>Mesajları çek</button></form>
+ <span class="muted">Son çekme: ${esc(syncedAt ?? "henüz yok")} · Bu sayfa sadece okur, eBay'e hiçbir şey göndermez.</span></div>
+<div class="wrap"><table><tr><th>Alıcı</th><th>Konu</th><th>Son mesaj</th><th>Sipariş</th><th>Zaman</th></tr>
+${rows.map((r) => {
+    const order = latestOrderOf(r.buyer);
+    const fromBuyer = r.buyer && r.last_sender === r.buyer;
+    const body = String(r.last_body ?? "");
+    return `<tr><td>${Number(r.unread_count) > 0 ? "<b>●</b> " : ""}${esc(r.buyer ?? "?")}</td>
+<td><a href="/messages/${encodeURIComponent(String(r.conversation_id))}">${esc(r.title)}</a></td>
+<td><small>${fromBuyer ? "" : `<span class="muted">Sen:</span> `}${esc(body.length > 120 ? `${body.slice(0, 120)}…` : body)}</small></td>
+<td><small>${order ? `${esc(order.order_id)}<br>${esc(order.fulfillment_status)}` : `<span class="muted">bulunamadı</span>`}</small></td>
+<td><small>${esc(r.last_message_at)}</small></td></tr>`;
+  }).join("") || `<tr><td colspan="5" class="muted">Henüz mesaj yok. "Mesajları çek" butonuna bas.</td></tr>`}
+</table></div>`);
+}
+
+function conversation(id: string): string | undefined {
+  const c = db.prepare("SELECT * FROM conversations WHERE conversation_id = ?").get(id) as Record<string, unknown> | undefined;
+  if (!c) return undefined;
+  const msgs = db.prepare("SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at").all(id) as Array<Record<string, unknown>>;
+  const order = latestOrderOf(c.buyer);
+  const items = order ? (JSON.parse(String(order.line_items)) as Array<{ title: string; quantity: number }>) : [];
+  return page(String(c.title ?? "Konuşma"), `<p><a href="/messages">← Mesajlar</a></p>
+<div class="card">Alıcı: <b>${esc(c.buyer ?? "?")}</b>${c.reference_id ? ` · İlan: ${esc(c.reference_id)}` : ""}<br>
+${order ? `Son sipariş: <b>${esc(order.order_id)}</b> (${esc(order.created_at)}) · ${esc(order.fulfillment_status)}<br>
+${items.map((i) => `${esc(i.quantity)}× ${esc(i.title)}`).join("<br>")}<br>
+Kargo: ${order.tracking_number ? `${esc(order.carrier)} ${esc(order.tracking_number)}${order.tracking_uploaded_at ? " (eBay'e gönderildi)" : ""}` : `<span class="muted">takip no girilmemiş</span>`}`
+    : `<span class="muted">Bu alıcıya ait sipariş panelde bulunamadı.</span>`}</div>
+${msgs.map((m) => {
+    const fromBuyer = c.buyer ? m.sender === c.buyer : true;
+    const media = (m.media ? (JSON.parse(String(m.media)) as Array<{ mediaName?: string; mediaUrl?: string }>) : []).filter((x) => x.mediaUrl?.startsWith("https://"));
+    return `<div class="msg ${fromBuyer ? "buyer" : "me"}"><small class="muted">${esc(m.sender)} · ${esc(m.created_at)}</small><br>${esc(m.body)}${media
+      .map((x) => `<br><a href="${esc(x.mediaUrl)}" rel="noreferrer" target="_blank">📎 ${esc(x.mediaName ?? "ek")}</a>`).join("")}</div>`;
+  }).join("")}`);
+}
+
 function rules(name = "default", error = ""): string {
   const sets = (db.prepare("SELECT key FROM settings WHERE key LIKE 'rules.%'").all() as Array<{ key: string }>).map((r) => r.key.slice(6));
   return page("Fiyat kuralları", `${error ? `<p class="err">${esc(error)}</p>` : ""}
@@ -117,6 +173,11 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   if (url.pathname === "/products" && !post) return send(res, 200, products());
   if (url.pathname === "/orders") return send(res, 200, orders());
   if (url.pathname === "/rules" && !post) return send(res, 200, rules(url.searchParams.get("set") ?? "default"));
+  if (url.pathname === "/messages" && !post) return send(res, 200, messages());
+  if (parts[0] === "messages" && parts[1] && !post) {
+    const html = conversation(parts[1]);
+    return html ? send(res, 200, html) : send(res, 404, page("Bulunamadı", ""));
+  }
 
   if (url.pathname === "/auth/ebay") {
     const state = randomBytes(16).toString("hex");
@@ -173,6 +234,11 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     await app.runOrderSync();
     return redirect(res, "/");
   }
+  if (url.pathname === "/sync/messages") {
+    if (needsMessageReconnect(db)) return redirect(res, "/messages");
+    await app.runMessageSync();
+    return redirect(res, "/messages");
+  }
   send(res, 404, page("Bulunamadı", ""));
 }
 
@@ -193,3 +259,6 @@ function every(minutes: number, name: string, job: () => Promise<unknown>) {
 }
 every(Number(process.env.PRICE_SYNC_MINUTES ?? 60), "prices", app.runPriceSync);
 every(Number(process.env.ORDER_SYNC_MINUTES ?? 10), "orders", app.runOrderSync);
+every(Number(process.env.MESSAGE_SYNC_MINUTES ?? 5), "messages", async () => {
+  if (!needsMessageReconnect(db)) await app.runMessageSync();
+});
